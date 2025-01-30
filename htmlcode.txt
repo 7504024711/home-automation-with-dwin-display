@@ -1,0 +1,208 @@
+#include <WiFi.h>
+#include <WebServer.h>
+#include <DHT.h>
+#include <SoftwareSerial.h>
+
+/* DWIN Display Communication */
+const byte rxPin = 16; // RX2
+const byte txPin = 17; // TX2
+SoftwareSerial mySerial(rxPin, txPin);
+
+/* Wi-Fi Credentials */
+const char* ssid = "iot_5";
+const char* password = "rpw1@iot";
+
+/* IP Configuration */
+IPAddress local_ip(192, 168, 4, 1);
+IPAddress gateway(192, 168, 4, 1);
+IPAddress subnet(255, 255, 255, 0);
+
+/* Web Server */
+WebServer server(80);
+
+/* GPIO Pins for Relays */
+uint8_t light = 23;
+uint8_t fan = 22;
+uint8_t tv = 21;
+uint8_t ac = 19;
+bool lightstatus = HIGH;
+bool fanstatus = HIGH;
+bool tvstatus = HIGH;
+bool acstatus = HIGH;
+
+/* DHT Sensor */
+#define DHTTYPE DHT11
+#define DHTPIN 18
+DHT dht(DHTPIN, DHTTYPE);
+
+/* LDR Sensor */
+#define LDR_PIN 35
+float temp, humi, ldrValue;
+
+/* Communication Buffers */
+byte Buffer[9]; // For receiving data from DWIN display
+byte Temperature[8] = {0x5A, 0xA5, 0x07, 0x82, 0x00, 0x02, 0x00, 0x00};
+byte Humidity[8] = {0x5A, 0xA5, 0x07, 0x83, 0x00, 0x02, 0x00, 0x00};
+byte LDR[8] = {0x5A, 0xA5, 0x07, 0x84, 0x00, 0x02, 0x00, 0x00};
+
+void setup() {
+  Serial.begin(115200);
+  mySerial.begin(115200);
+
+  pinMode(light, OUTPUT);
+  pinMode(fan, OUTPUT);
+  pinMode(tv, OUTPUT);
+  pinMode(ac, OUTPUT);
+
+  dht.begin();
+  WiFi.begin(ssid, password);
+  Serial.print("Connecting to Wi-Fi");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nWi-Fi connected.");
+  Serial.print("IP Address: ");
+  Serial.println(WiFi.localIP());
+
+  server.on("/", handle_OnConnect);
+  server.on("/lighton", handle_lighton);
+  server.on("/lightoff", handle_lightoff);
+  server.on("/fanon", handle_fanon);
+  server.on("/fanoff", handle_fanoff);
+  server.on("/tvon", handle_tvon);
+  server.on("/tvoff", handle_tvoff);
+  server.on("/acon", handle_acon);
+  server.on("/acoff", handle_acoff);
+  server.onNotFound(handle_NotFound);
+
+  server.begin();
+  Serial.println("HTTP server started");
+}
+
+void loop() {
+  server.handleClient();
+  ldrValue = map(analogRead(LDR_PIN), 400, 4200, 0, 100);
+  temp = dht.readTemperature();
+  humi = dht.readHumidity();
+
+  if (lightstatus) digitalWrite(light, HIGH);
+  else digitalWrite(light, LOW);
+
+  if (fanstatus) digitalWrite(fan, HIGH);
+  else digitalWrite(fan, LOW);
+
+  if (tvstatus) digitalWrite(tv, HIGH);
+  else digitalWrite(tv, LOW);
+
+  if (acstatus) digitalWrite(ac, HIGH);
+  else digitalWrite(ac, LOW);
+
+  Data_Arduino_to_Display();
+  Data_Display_to_Arduino();
+}
+
+/* Handlers for Web Page */
+void handle_OnConnect() {
+  server.send(200, "text/html", SendHTML(lightstatus, fanstatus, tvstatus, acstatus));
+}
+
+void handle_lighton() {
+  lightstatus = HIGH;
+  server.send(200, "text/html", SendHTML(lightstatus, fanstatus, tvstatus, acstatus));
+}
+
+void handle_lightoff() {
+  lightstatus = LOW;
+  server.send(200, "text/html", SendHTML(lightstatus, fanstatus, tvstatus, acstatus));
+}
+
+void handle_fanon() {
+  fanstatus = HIGH;
+  server.send(200, "text/html", SendHTML(lightstatus, fanstatus, tvstatus, acstatus));
+}
+
+void handle_fanoff() {
+  fanstatus = LOW;
+  server.send(200, "text/html", SendHTML(lightstatus, fanstatus, tvstatus, acstatus));
+}
+
+void handle_tvon() {
+  tvstatus = HIGH;
+  server.send(200, "text/html", SendHTML(lightstatus, fanstatus, tvstatus, acstatus));
+}
+
+void handle_tvoff() {
+  tvstatus = LOW;
+  server.send(200, "text/html", SendHTML(lightstatus, fanstatus, tvstatus, acstatus));
+}
+
+void handle_acon() {
+  acstatus = HIGH;
+  server.send(200, "text/html", SendHTML(lightstatus, fanstatus, tvstatus, acstatus));
+}
+void handle_acoff() {
+  acstatus = LOW;
+  server.send(200, "text/html", SendHTML(lightstatus, fanstatus, tvstatus, acstatus));
+}
+
+void handle_NotFound() {
+  server.send(404, "text/plain", "Not found");
+}
+
+/* Generate HTML for Web Page */
+String SendHTML(uint8_t lightstat, uint8_t fanstat, uint8_t tvstat, uint8_t acstat) {
+  String ptr = "<!DOCTYPE html><html>";
+  ptr += "<head><meta name='viewport' content='width=device-width, initial-scale=1.0, user-scalable=no'>";
+  ptr += "<title>Smart Home Control</title>";
+  ptr += "<style>/* CSS styles omitted for brevity */</style>";
+  ptr += "</head><body>";
+  ptr += "<div class='container'><h1>ESP32 Smart Home</h1>";
+  ptr += "<div class='sensor'>Temperature: <strong>" + String((int)temp) + " &deg;C</strong></div>";
+  ptr += "<div class='sensor'>Humidity: <strong>" + String((int)humi) + " %</strong></div>";
+  ptr += "<div class='sensor'>Light Intensity: <strong>" + String((int)ldrValue) + "</strong></div>";
+  ptr += "<div><p>Light: " + String(lightstat ? "ON" : "OFF") + "</p><a href='/" + String(lightstat ? "lightoff" : "lighton") + "'>";
+  ptr += lightstat ? "Turn OFF" : "Turn ON"; ptr += "</a></div>";
+  ptr += "<div><p>Fan: " + String(fanstat ? "ON" : "OFF") + "</p><a href='/" + String(fanstat ? "fanoff" : "fanon") + "'>";
+  ptr += fanstat ? "Turn OFF" : "Turn ON"; ptr += "</a></div>";
+  ptr += "<div><p>TV: " + String(tvstat ? "ON" : "OFF") + "</p><a href='/" + String(tvstat ? "tvoff" : "tvon") + "'>";
+  ptr += tvstat ? "Turn OFF" : "Turn ON"; ptr += "</a></div>";
+  ptr += "<div><p>AC: " + String(acstat ? "ON" : "OFF") + "</p><a href='/" + String(acstat ? "acoff" : "acon") + "'>";
+  ptr += acstat ? "Turn OFF" : "Turn ON"; ptr += "</a></div></div>";
+  ptr += "</body></html>";
+  return ptr;
+}
+
+/* Communication Functions */
+void Data_Display_to_Arduino() {
+  if (mySerial.available()) {
+    for (int i = 0; i <= 8; i++) Buffer[i] = mySerial.read();
+    if (Buffer[0] == 0x5A) {
+      switch (Buffer[4]) {
+        case 0x25: lightstatus = Buffer[8] == 1; break;
+        case 0x30: fanstatus = Buffer[8] == 1; break;
+        case 0x35: tvstatus = Buffer[8] == 1; break;
+        case 0x40: acstatus = Buffer[8] == 1; break;
+      }
+    }
+  }
+}
+
+void Data_Arduino_to_Display() {
+  delay(1000);
+  int ldrVal = ldrValue;
+  int t = temp;
+  int h = humi;
+
+  Temperature[6] = highByte(t);
+  Temperature[7] = lowByte(t);
+  mySerial.write(Temperature, 8);
+
+  Humidity[6] = highByte(h);
+  Humidity[7] = lowByte(h);
+  mySerial.write(Humidity, 8);
+
+  LDR[6] = highByte(ldrVal);
+  LDR[7] = lowByte(ldrVal);
+  mySerial.write(LDR, 8);
+}
